@@ -9,140 +9,149 @@ use Illuminate\Http\JsonResponse;
 class CsvController extends Controller
 {
     /**
-     * Lista todos los ficheros CSV de la carpeta storage/app.
+     * Lista todos los ficheros CSV disponibles en el almacenamiento.
      *
-     * @return JsonResponse La respuesta en formato JSON.
-     *
-     * El JSON devuelto debe tener las siguientes claves:
-     * - mensaje: Un mensaje indicando el resultado de la operación.
-     * - contenido: Un array con los nombres de los ficheros.
+     * @return JsonResponse Respuesta JSON con el listado de archivos CSV.
      */
-    public function index()
-{
-    $files = collect(Storage::files('app'))
-                ->filter(fn($file) => pathinfo($file, PATHINFO_EXTENSION) === 'csv')
-                ->map(fn($file) => basename($file))
-                ->values();
+    public function index(): JsonResponse
+    {
+        // Obtiene todos los archivos en el directorio storage/app.
+        $files = Storage::files();
 
-    return response()->json([
-        'mensaje' => 'Operación exitosa',
-        'contenido' => $files,
-    ], 200);
-}
+        // Filtra los archivos que tienen extensión .csv.
+        $csvFiles = array_filter($files, fn($file) => pathinfo($file, PATHINFO_EXTENSION) === 'csv');
 
-   /**
-     * Recibe por parámetro el nombre de fichero y el contenido CSV y crea un nuevo fichero con ese nombre y contenido en storage/app. 
-     * Devuelve un JSON con el resultado de la operación.
-     * Si el fichero ya existe, devuelve un 409.
-     *
-     * @param filename Parámetro con el nombre del fichero. Devuelve 422 si no hay parámetro.
-     * @param content Contenido del fichero. Devuelve 422 si no hay parámetro.
-     * @return JsonResponse La respuesta en formato JSON.
-     *
-     * El JSON devuelto debe tener las siguientes claves:
-     * - mensaje: Un mensaje indicando el resultado de la operación.
-     */
-    public function store(Request $request)
-{
-    $filename = $request->input('filename');
-    $content = $request->input('content');
-
-    if (!$filename || !$content) {
-        return response()->json(['mensaje' => 'Parámetros incompletos'], 422);
+        // Devuelve un JSON con el listado de archivos CSV.
+        return response()->json([
+            'mensaje' => 'Listado de ficheros',
+            'contenido' => array_values($csvFiles), // Limpia los índices para una respuesta más clara.
+        ], 200);
     }
-
-    if (Storage::exists("app/$filename")) {
-        return response()->json(['mensaje' => 'El fichero ya existe'], 409);
-    }
-
-    Storage::put("app/$filename", $content);
-
-    return response()->json(['mensaje' => 'Fichero guardado exitosamente'], 201);
-}
 
     /**
-     * Recibe por parámetro el nombre de un fichero CSV el nombre de fichero y devuelve un JSON con su contenido.
-     * Si el fichero no existe devuelve un 404.
-     * Hay que hacer uso lo visto en la presentación CSV to JSON.
+     * Crea un nuevo fichero CSV con el contenido proporcionado.
      *
-     * @param name Parámetro con el nombre del fichero CSV.
-     * @return JsonResponse La respuesta en formato JSON.
+     * @param Request $request Objeto de la solicitud con los datos necesarios.
+     * @return JsonResponse Respuesta JSON indicando el resultado de la operación.
+     */
+    public function store(Request $request): JsonResponse
+    {
+        // Obtiene los parámetros del request.
+        $filename = $request->input('filename');
+        $content = $request->input('content');
+
+        // Verifica que los parámetros sean válidos.
+        if (!$filename || !$content) {
+            return response()->json(['mensaje' => 'Faltan parámetros'], 422);
+        }
+
+        // Verifica si el archivo ya existe.
+        if (Storage::exists($filename)) {
+            return response()->json(['mensaje' => 'El fichero ya existe'], 409);
+        }
+
+        // Guarda el archivo con el contenido proporcionado.
+        Storage::put($filename, $content);
+
+        // Devuelve un mensaje de éxito.
+        return response()->json(['mensaje' => 'Guardado con éxito'], 200);
+    }
+
+    /**
+     * Muestra el contenido de un fichero CSV en formato JSON.
      *
-     * El JSON devuelto debe tener las siguientes claves:
-     * - mensaje: Un mensaje indicando el resultado de la operación.
-     * - contenido: El contenido del fichero si se ha leído con éxito.
+     * @param string $id Nombre del fichero a mostrar.
+     * @return JsonResponse Respuesta JSON con el contenido del archivo.
      */
     public function show(string $id)
-{
-    if (!Storage::exists("app/$id")) {
-        return response()->json(['mensaje' => 'El fichero no existe'], 404);
+    {
+        // Construye la ruta completa del archivo.
+        $path = "app/{$id}";
+
+        // Verifica si el archivo existe en el almacenamiento.
+        if (!Storage::exists($path)) {
+            return response()->json(['mensaje' => 'Fichero no encontrado'], 404);
+        }
+
+        // Obtiene el contenido del archivo.
+        $content = Storage::get($path);
+
+        // Divide el contenido en líneas.
+        $lines = explode("\n", trim($content));
+
+        // Verifica que haya datos válidos en el archivo.
+        if (count($lines) < 2) {
+            return response()->json([
+                'mensaje' => 'El fichero no contiene datos válidos',
+                'contenido' => [],
+            ]);
+        }
+
+        // Procesa la primera línea como encabezados.
+        $headers = str_getcsv(array_shift($lines));
+
+        // Combina los encabezados con las filas para generar datos estructurados.
+        $data = array_map(fn($line) => array_combine($headers, str_getcsv($line)), $lines);
+
+        // Devuelve el contenido del archivo en formato JSON.
+        return response()->json([
+            'mensaje' => 'Fichero leído con éxito',
+            'contenido' => $data,
+        ]);
     }
 
-    $content = Storage::get("app/$id");
-    $rows = explode("\n", trim($content));
-    $header = str_getcsv(array_shift($rows));
-    $data = array_map(fn($row) => array_combine($header, str_getcsv($row)), $rows);
-
-    return response()->json([
-        'mensaje' => 'Fichero leído con éxito',
-        'contenido' => $data,
-    ], 200);
-}
-
-   /**
-     * Recibe por parámetro el nombre de fichero, el contenido CSV y actualiza el fichero CSV. 
-     * Devuelve un JSON con el resultado de la operación.
-     * Si el fichero no existe devuelve un 404.
-     * Si el contenido no es un JSON válido, devuelve un 415.
-     * 
-     * @param filename Parámetro con el nombre del fichero. Devuelve 422 si no hay parámetro.
-     * @param content Contenido del fichero. Devuelve 422 si no hay parámetro.
-     * @return JsonResponse La respuesta en formato JSON.
+    /**
+     * Actualiza el contenido de un fichero CSV existente.
      *
-     * El JSON devuelto debe tener las siguientes claves:
-     * - mensaje: Un mensaje indicando el resultado de la operación.
+     * @param Request $request Objeto de la solicitud con los nuevos datos.
+     * @param string $id Nombre del fichero a actualizar.
+     * @return JsonResponse Respuesta JSON indicando el resultado de la operación.
      */
     public function update(Request $request, string $id)
-{
-    $filename = $request->input('filename');
-    $content = $request->input('content');
+    {
+        // Construye la ruta completa del archivo.
+        $path = "app/{$id}";
 
-    if (!$filename || !$content) {
-        return response()->json(['mensaje' => 'Parámetros incompletos'], 422);
+        // Verifica si el archivo existe.
+        if (!Storage::exists($path)) {
+            return response()->json(['mensaje' => 'Fichero no encontrado'], 404);
+        }
+
+        // Obtiene el contenido del request.
+        $content = $request->input('content');
+
+        // Verifica que el contenido sea válido.
+        if (!$content || !is_string($content)) {
+            return response()->json(['mensaje' => 'Contenido inválido'], 422);
+        }
+
+        // Sobrescribe el contenido del archivo.
+        Storage::put($path, $content);
+
+        // Devuelve un mensaje indicando que la actualización fue exitosa.
+        return response()->json(['mensaje' => 'Fichero actualizado exitosamente']);
     }
 
-    if (!Storage::exists("app/$id")) {
-        return response()->json(['mensaje' => 'El fichero no existe'], 404);
-    }
-
-    $lines = explode("\n", trim($content));
-    if (!count($lines) || !str_contains($lines[0], ',')) {
-        return response()->json(['mensaje' => 'Contenido no es un CSV válido'], 415);
-    }
-
-    Storage::put("app/$id", $content);
-
-    return response()->json(['mensaje' => 'Fichero actualizado exitosamente'], 200);
-}
-
-     /**
-     * Recibe por parámetro el nombre de ficher y lo elimina.
-     * Si el fichero no existe devuelve un 404.
+    /**
+     * Elimina un fichero CSV del almacenamiento.
      *
-     * @param filename Parámetro con el nombre del fichero. Devuelve 422 si no hay parámetro.
-     * @return JsonResponse La respuesta en formato JSON.
-     *
-     * El JSON devuelto debe tener las siguientes claves:
-     * - mensaje: Un mensaje indicando el resultado de la operación.
+     * @param string $id Nombre del fichero a eliminar.
+     * @return JsonResponse Respuesta JSON indicando el resultado de la operación.
      */
     public function destroy(string $id)
-{
-    if (!Storage::exists("app/$id")) {
-        return response()->json(['mensaje' => 'El fichero no existe'], 404);
+    {
+        // Construye la ruta completa del archivo.
+        $path = "app/{$id}";
+
+        // Verifica si el archivo existe.
+        if (!Storage::exists($path)) {
+            return response()->json(['mensaje' => 'Fichero no encontrado'], 404);
+        }
+
+        // Elimina el archivo del almacenamiento.
+        Storage::delete($path);
+
+        // Devuelve un mensaje indicando que el archivo fue eliminado.
+        return response()->json(['mensaje' => 'Fichero eliminado exitosamente']);
     }
-
-    Storage::delete("app/$id");
-
-    return response()->json(['mensaje' => 'Fichero eliminado exitosamente'], 200);
-}
 }

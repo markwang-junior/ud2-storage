@@ -2,70 +2,75 @@
 
 namespace Tests\Feature;
 
-use Illuminate\Support\Facades\Storage;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Foundation\Testing\WithFaker;
 use Tests\TestCase;
+use Illuminate\Support\Facades\Storage;
 
 class CsvTest extends TestCase
 {
-    public function test_index_returns_valid_csv_files()
+    public function testIndex()
     {
         Storage::fake('local');
 
-        Storage::put('app/valid.csv', 'header1,header2\nvalue1,value2');
-        Storage::put('app/invalid.txt', 'This is not a CSV file');
+        Storage::put('file1.csv', 'header1,header2\nvalue1,value2');
+        Storage::put('file2.csv', 'header1,header2\nvalue1,value2');
+        Storage::put('valid.json', json_encode(['key' => 'value']));
 
-        $response = $this->get('/api/csv');
+        $response = $this->getJson('/api/csv');
 
         $response->assertStatus(200)
                  ->assertJson([
-                     'mensaje' => 'Operación exitosa',
-                     'contenido' => ['valid.csv']
+                     'mensaje' => 'Listado de ficheros',
+                     'contenido' => ['file1.csv', 'file2.csv'],
                  ]);
     }
 
-    public function test_store_creates_new_csv_file()
-    {
-        Storage::fake('local');
-
-        $data = [
-            'filename' => 'newfile.csv',
-            'content' => "header1,header2\nvalue1,value2"
-        ];
-
-        $response = $this->post('/api/csv', $data);
-
-        $response->assertStatus(201)
-                 ->assertJson(['mensaje' => 'Fichero guardado exitosamente']);
-
-        Storage::assertExists('app/newfile.csv');
-    }
-
-    public function test_show_returns_file_content()
+    public function testShow()
     {
         Storage::fake('local');
 
         Storage::put('app/existingfile.csv', "header1,header2\nvalue1,value2");
+
 
         $response = $this->get('/api/csv/existingfile.csv');
 
         $response->assertStatus(200)
-                 ->assertJson([
-                     'mensaje' => 'Fichero leído con éxito',
-                     'contenido' => [
-                         ['header1' => 'value1', 'header2' => 'value2']
-                     ]
-                 ]);
+                    ->assertJson([
+                        'mensaje' => 'Fichero leído con éxito',
+                        'contenido' => [
+                            ['header1' => 'value1', 'header2' => 'value2']
+                        ]
+                    ]);
     }
 
-    public function test_update_modifies_existing_file()
+    public function testStore()
     {
         Storage::fake('local');
 
-        Storage::put('app/existingfile.csv', "header1,header2\nvalue1,value2");
+        $response = $this->postJson('/api/csv', [
+            'filename' => 'file1.csv',
+            'content' => 'Content 1',
+        ]);
+
+        $response->assertStatus(200)
+                 ->assertJson([
+                     'mensaje' => 'Guardado con éxito',
+                 ]);
+
+        Storage::disk('local')->assertExists('file1.csv');
+        $this->assertEquals('Content 1', Storage::disk('local')->get('file1.csv'));
+    }
+
+    public function testUpdate()
+    {
+        Storage::fake('local');
+
+        Storage::put('app/existingfile.csv', json_encode(['key' => 'value']));
 
         $data = [
             'filename' => 'existingfile.csv',
-            'content' => "header1,header2\nnewvalue1,newvalue2"
+            'content' => json_encode(['new_key' => 'new_value'])
         ];
 
         $response = $this->put('/api/csv/existingfile.csv', $data);
@@ -74,21 +79,19 @@ class CsvTest extends TestCase
                  ->assertJson(['mensaje' => 'Fichero actualizado exitosamente']);
 
         Storage::assertExists('app/existingfile.csv');
-        $this->assertEquals("header1,header2\nnewvalue1,newvalue2", Storage::get('app/existingfile.csv'));
+        $this->assertEquals(json_encode(['new_key' => 'new_value']), Storage::get('app/existingfile.csv'));
     }
 
-    public function test_destroy_deletes_existing_file()
-    {
+    public function testDestroy() {
         Storage::fake('local');
 
-        Storage::put('app/existingfile.csv', "header1,header2\nvalue1,value2");
+        Storage::put('app/existingfile.csv', json_encode(['key' => 'value']));
 
         $response = $this->delete('/api/csv/existingfile.csv');
 
         $response->assertStatus(200)
-                 ->assertJson(['mensaje' => 'Fichero eliminado exitosamente']);
+                    ->assertJson(['mensaje' => 'Fichero eliminado exitosamente']);
 
         Storage::assertMissing('app/existingfile.csv');
     }
-
 }
